@@ -6,6 +6,7 @@ from ..db import database
 
 class FileSchema(TypedDict):
     name: str = Field(..., description="Name of the file")
+    job_desc: Optional[str] = Field(None, description="Job description")
     status: str = Field(..., description="Status of the file")
     result: Optional[str] = Field(None, description="The result form AI")
 

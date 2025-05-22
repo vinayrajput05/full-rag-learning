@@ -2,6 +2,7 @@ from ..db.collections.files import files_collection
 from bson import ObjectId
 import os
 import base64
+import json
 from pdf2image import convert_from_path
 from openai import OpenAI
 
@@ -16,7 +17,7 @@ def encode_image(image_path: str):
         return base64.b64encode(image_file.read()).decode("utf-8")
 
 
-async def process_file(id: str, file_path: str):
+async def process_file(id: str, file_path: str, job_description: str):
     await files_collection.update_one({"_id": ObjectId(id)}, {
         "$set": {
             "status": "processing"
@@ -47,30 +48,83 @@ async def process_file(id: str, file_path: str):
 
     images_base64 = [encode_image(img) for img in images]
 
-    result = client.chat.completions.create(
-        model="gemini-2.0-flash",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Based on the resume below, Roast this resume"},
-                    {
-                        # flake8: noqa
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{images_base64[0]}"
-                        },
-                    },
-                ],
-            }
-        ],
-    )
+    system_prompt = f"""You are an expert in reviewing resumes.
+                First, break down the job description step by step. Analyze, describe and rewrite.
+                After that review the provided resume based on the newly written job description. Suggest improvements to align the resume with the job requirements.
+                
+                Follow the steps in sequence that is "analyse", "describe", "rewrite", "output" and finally "result".
+                
+                Rules:
+                1. Follow the strict JSON output as per Output schema.
+                2. Always perform one step at a time and wait for next input
+                3. Carefully analyse the user query
+                
+                Output Format:
+                {{ step: "string", content: "string" }}
+                """
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content":  f"Job description: {job_description}"},
+    ]
 
-    await files_collection.update_one({"_id": ObjectId(id)}, {
-        "$set": {
-            "status": "processed",
-            "result": result.choices[0].message.content
-        }
-    })
+    while True:
+        response = client.chat.completions.create(
+            model="gemini-2.0-flash",
+            response_format={"type": "json_object"},
+            messages=messages
+        )
+        parsed_response = json.loads(response.choices[0].message.content)
+
+        # flake8: noqa
+        messages.append(
+            {"role": "assistant", "content": json.dumps(parsed_response)})
+
+        if parsed_response.get('step') == "output":
+            messages.append(
+                {"role": "user", "content": [{
+                    "type": 'image_url',
+                            "image_url": {"url": f"data:image/jpeg;base64,{images_base64[0]}"}},
+                ]
+                }
+            )
+
+        if parsed_response.get('step') != "result":
+            print(
+                f"🧠: {parsed_response.get("step")} : {parsed_response.get("content")}")
+            continue
+        await files_collection.update_one({"_id": ObjectId(id)}, {
+            "$set": {
+                "status": "processed",
+                "result": parsed_response.get("content")
+            }
+        })
+        break
+
+    # print(result.choices[0].message)
+    # await files_collection.update_one({"_id": ObjectId(id)}, {
+    #     "$set": {
+    #         "status": "processed",
+    #         "result": result.choices[0].message.content
+    #     }
+    # })
+
+
+# messages=[
+
+        #     {
+        #         "role": "user",
+        #         "content": [
+        #             {
+        #                 "type": "text",
+        #                 "text": f"Job description: {job_description}"
+        #             },
+        #             {
+        #                 # flake8: noqa
+        #                 "type": "image_url",
+        #                 "image_url": {
+        #                         "url": f"data:image/jpeg;base64,{images_base64[0]}"
+        #                 },
+        #             },
+        #         ],
+        #     }
+        # ],
