@@ -3,11 +3,12 @@ from bson import ObjectId
 import os
 import base64
 import json
+import os
 from pdf2image import convert_from_path
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="AIzaSyBex9QH8-KBdUJQ70GrltTM3f31vHSnTTc",
+    api_key=os.getenv("GEMINI_KEY"),
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
